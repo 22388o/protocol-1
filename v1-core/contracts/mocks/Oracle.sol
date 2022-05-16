@@ -19,12 +19,12 @@ contract MockOracle {
         uint256 floorPriceEth = mockEthFloorPrices[collateral];
         require(floorPriceEth > 0, "UNSET_MOCK_FLOORPRICE"); 
 
-        uint256 ethTokenPrice = ethTokenPrices[asset]; // TODO:
-        require(ethTokenPrice > 0, "UNSET_MOCK_TOKENPRICE"); 
+        // uint256 ethTokenPrice = ethTokenPrices[asset]; // TODO: create a new / hybrid function for other ccys
+        // require(ethTokenPrice > 0, "UNSET_MOCK_TOKENPRICE"); 
 
-        uint256 ethTokenPriceDecimal = 1000000000000000000; // 18d TODO: connect Token Price Oracle 
-        uint256 floorPrice = floorPriceEth.mul(ethTokenPrice).div(ethTokenPriceDecimal);
-        return floorPrice;
+        // uint256 ethTokenPriceDecimal = 1000000000000000000; // 18d TODO: connect Token Price Oracle 
+        // uint256 floorPrice = floorPriceEth.mul(ethTokenPrice).div(ethTokenPriceDecimal);
+        return floorPriceEth;
     }
 
     /// @notice Mocks an oracle setting the NFT floor price in terms of ETH (WIP)

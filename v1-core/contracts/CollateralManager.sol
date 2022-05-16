@@ -9,8 +9,9 @@ import "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
 import "@openzeppelin/contracts/utils/Counters.sol";
 import "@openzeppelin/contracts/utils/Context.sol";
 import { DataTypes } from './libraries/DataTypes.sol';
+import { InterestLogic } from "./libraries/InterestLogic.sol";
 import { SafeMath } from '@openzeppelin/contracts/utils/math/SafeMath.sol';
-
+import "./WadRayMath.sol";
 import "hardhat/console.sol";
 
 /// @title A contract for managing borrows and their underlying collateral
@@ -19,6 +20,7 @@ import "hardhat/console.sol";
 /// @dev Acts as the NFT collateral escrow.
 contract CollateralManager is Context, IERC721Receiver, AccessControl, Pausable, ReentrancyGuard {
     using SafeMath for uint256;
+    using WadRayMath for uint256;
     using Counters for Counters.Counter;
 
     bytes32 public constant CONFIGURATOR_ROLE = keccak256("CONFIGURATOR_ROLE");
@@ -28,8 +30,9 @@ contract CollateralManager is Context, IERC721Receiver, AccessControl, Pausable,
 
     mapping(uint256 => DataTypes.Borrow) public borrows;
     mapping(address => uint256[]) public userBorrows;
+    mapping(bytes32 => uint256) public nftBorrows;
     mapping(address => uint256) public liquidationThresholds;
-    mapping(address => uint256) public interestRates;
+    mapping(bytes32 => uint256) public interestRates;
     mapping(address => bool) private whitelisted;
 
     Counters.Counter private counter;
@@ -70,11 +73,13 @@ contract CollateralManager is Context, IERC721Receiver, AccessControl, Pausable,
         uint256 id
     );
 
-    /// @notice Emitted when the interest rate is set for a given NFT project.
-    /// @param erc721Token The ERC721 token for the NFT project.
-    /// @param interestRate The 18 decimal interest rate.
+    /// @notice Emitted when the interest rate is set for a given reserve.
+    /// @param collateral The collateral contract address.
+    /// @param asset The asset contract address
+    /// @param interestRate Interest rate in RAY (1e27)
     event SetInterestRate(
-        address erc721Token,
+        address collateral,
+        address asset,
         uint256 interestRate
     );
 
@@ -97,6 +102,7 @@ contract CollateralManager is Context, IERC721Receiver, AccessControl, Pausable,
     constructor(address configurator, address lendingPool) {
         _setupRole(CONFIGURATOR_ROLE, configurator);
         _setupRole(LENDING_POOL_ROLE, lendingPool);
+        counter.increment(); // to start borrow ids at 1
     }
 
     modifier onlyConfigurator() {
@@ -110,7 +116,15 @@ contract CollateralManager is Context, IERC721Receiver, AccessControl, Pausable,
     }
 
     modifier whenBorrowActive(uint256 _id) {
-        require(borrows[_id].status == DataTypes.BorrowStatus.Active, "Borrow is not active");
+        require(
+            borrows[_id].status == DataTypes.BorrowStatus.Active ||
+            borrows[_id].status == DataTypes.BorrowStatus.ActiveAuction, 
+            "Borrow / auction is not active");
+        _;
+    }
+
+    modifier whenBorrowActiveAuction(uint256 _id) {
+        require(borrows[_id].status == DataTypes.BorrowStatus.ActiveAuction, "Borrow auction is not active");
         _;
     }
 
@@ -120,10 +134,9 @@ contract CollateralManager is Context, IERC721Receiver, AccessControl, Pausable,
     /// @param erc721Token The ERC721 token to be used as collateral.
     /// @param tokenId The tokenId of the ERC721 token to be deposited.
     /// @param borrowAmount The amount of ERC20 tokens to be borrowed.
-    /// @param repaymentAmount The amount of ERC20 tokens to be repaid. 
-    /// @param interestRate The interest rate APR on the borrowed amount to 18 decimals.
+    /// @param interestRate The interest rate APR on the borrowed amount in RAY (1e27).
     /// @param collateralFloorPrice The current floor price of the ERC721 token.
-    /// @param maturity The borrow maturity timestamp.
+    /// @param timestamp When the borrow was executed.
     /// @dev Calls internal `_deposit` function if modifiers are succeeded.  
     /// @return Boolean for success
     function deposit(
@@ -132,10 +145,9 @@ contract CollateralManager is Context, IERC721Receiver, AccessControl, Pausable,
         address erc721Token, 
         uint256 tokenId, 
         uint256 borrowAmount,
-        uint256 repaymentAmount,
         uint256 interestRate,
         uint256 collateralFloorPrice,
-        uint256 maturity
+        uint40 timestamp
     ) 
         external 
         nonReentrant
@@ -149,10 +161,9 @@ contract CollateralManager is Context, IERC721Receiver, AccessControl, Pausable,
             erc721Token, 
             tokenId, 
             borrowAmount,
-            repaymentAmount,
             interestRate,
             collateralFloorPrice,
-            maturity
+            timestamp
         );
         return success;
     }
@@ -172,15 +183,23 @@ contract CollateralManager is Context, IERC721Receiver, AccessControl, Pausable,
         onlyLendingPool 
         whenNotPaused 
         whenBorrowActive(_id)
-        returns (bool)
+        returns (
+            bool,
+            uint256,
+            uint256
+        )
     {
-        bool success = _withdraw(
+        (
+            bool success,
+            uint256 borrowAmount,
+            uint256 interestRate
+        ) = _withdraw(
             _id, 
             _asset, 
             _repaymentAmount
         );
 
-        return success;
+        return (success, borrowAmount, interestRate);
     }
 
     /// @notice To retrieve the ERC721 token collateral for a borrow position liquidator.
@@ -200,7 +219,7 @@ contract CollateralManager is Context, IERC721Receiver, AccessControl, Pausable,
         nonReentrant
         onlyLendingPool
         whenNotPaused 
-        whenBorrowActive(_id)
+        whenBorrowActiveAuction(_id)
         returns (bool)
     {
         bool success = _retrieve(
@@ -225,14 +244,15 @@ contract CollateralManager is Context, IERC721Receiver, AccessControl, Pausable,
         _unpause();
     }
 
-    /// @notice Sets the interest rate APY for a given ERC721 token.
-    /// @param erc721Token The ERC721 token for which to set the interest rate.
-    /// @param interestRate The (new) interest rate APY to set for the project.
-    /// @dev Mapping used to keep track of interest rates, set per NFT project.
-    function setInterestRate(address erc721Token, uint256 interestRate) external onlyConfigurator {
-        interestRates[erc721Token] = interestRate;
+    /// @notice Sets the interest rate APY for a given reserve.
+    /// @param collateral The collateral contract address.
+    /// @param asset The asset contract address.
+    /// @param interestRate The (new) interest rate APY to set for the reserve.
+    /// @dev Mapping used to keep track of interest rates, set per reserve.
+    function setInterestRate(address collateral, address asset, uint256 interestRate) external onlyConfigurator {
+        interestRates[keccak256(abi.encode(collateral, asset))] = interestRate;
 
-        emit SetInterestRate(erc721Token, interestRate);
+        emit SetInterestRate(collateral, asset, interestRate);
     }
 
     /// @notice Sets the liquidation threshold for a given ERC721 token.
@@ -291,12 +311,109 @@ contract CollateralManager is Context, IERC721Receiver, AccessControl, Pausable,
         return borrows[borrowId];
     }
 
-    /// @notice Gets the interest rate APY for a given ERC721 token.
-    /// @param erc721Token The ERC721 token for which to get the interest rate.
-    /// @dev Retrieves the NFT project interest rate back from the mapping.
-    /// @return Interest rate APR to 18 decimal places.
-    function getInterestRate(address erc721Token) public view returns (uint256) {
-        return interestRates[erc721Token];
+    /// @notice retrieves the Borrow id for given collateral and tokenId.
+    /// @param collateral Collateral contract address
+    /// @param tokenId Collatera token id.
+    /// @dev Returns 0 if doesn't exists. Borrow Ids starting from 1.
+    /// @return Returns the Borrow for a given id.
+    function getBorrowId(address collateral, uint256 tokenId) public view returns (uint256) {
+        return nftBorrows[keccak256(abi.encode(collateral, tokenId))];
+    }
+
+    function getBorrowBalance(address collateral, uint256 tokenId) public view returns (uint256) {
+        uint256 borrowBalanceAmount;
+        uint256 borrowId = nftBorrows[keccak256(abi.encode(collateral, tokenId))];
+        DataTypes.Borrow memory borrowItem = borrows[borrowId];
+        if (borrowItem.borrowAmount > 0) {
+            borrowBalanceAmount = borrowItem.borrowAmount
+            .add(
+                (borrowItem.borrowAmount)
+                .rayMul(borrowItem.interestRate)
+                .mul(block.timestamp.sub(borrowItem.timestamp))
+                .div(365 days)
+            );
+        }
+        return borrowBalanceAmount;
+    }
+
+    function setBorrowAuctionBid(
+        uint256 borrowId, 
+        uint256 auctionBid, 
+        address auctionBidder
+    ) 
+        public 
+        onlyLendingPool
+        returns (bool) 
+    {
+        borrows[borrowId].auction.bid = auctionBid;
+        borrows[borrowId].auction.bidder = auctionBidder;
+        return true;
+    }
+
+    function setBorrowAuctionCall(
+        uint256 borrowId, 
+        uint256 auctionBid, 
+        uint256 auctionLiquidationFee,
+        uint40 auctionTimestamp,
+        address auctionCaller
+    ) 
+        public 
+        onlyLendingPool
+        returns (bool) 
+    {
+        borrows[borrowId].auction.bid = auctionBid;
+        borrows[borrowId].auction.liquidationFee = auctionLiquidationFee;
+        borrows[borrowId].auction.timestamp = auctionTimestamp;
+        borrows[borrowId].auction.caller = auctionCaller;
+        borrows[borrowId].auction.bidder = auctionCaller;
+        borrows[borrowId].status = DataTypes.BorrowStatus.ActiveAuction;
+        return true;
+    }
+
+
+    function updateBorrow(
+        uint256 _id,
+        address _asset,
+        uint256 _updateAmount, 
+        uint256 _collateralFloorPrice,
+        DataTypes.BorrowStatus _status,
+        bool _isRepayment,
+        address _msgSender
+    ) 
+        public 
+        onlyLendingPool
+        returns (bool, uint256, uint256) 
+    {
+        return _updateBorrow(
+            _id, 
+            _asset, 
+            _updateAmount, 
+            _collateralFloorPrice,
+            _status,
+            _isRepayment,
+            _msgSender
+        );
+    }
+
+    function setBorrowStatus(
+        uint256 borrowId, 
+        DataTypes.BorrowStatus status
+    ) 
+        public 
+        onlyLendingPool
+        returns (bool) 
+    {
+        borrows[borrowId].status = status;
+        return true;
+    }
+
+    /// @notice Gets the interest rate APY for a reserve.
+    /// @param collateral The collateral contract address.
+    /// @param asset The asset contract address.
+    /// @dev Retrieves the reserve interest rate back from the mapping.
+    /// @return Interest rate in RAY (1e27)
+    function getInterestRate(address collateral, address asset) public view returns (uint256) {
+        return interestRates[keccak256(abi.encode(collateral, asset))];
     }
 
     /// @notice Gets the liquidation threshold for a given ERC721 token.
@@ -328,8 +445,8 @@ contract CollateralManager is Context, IERC721Receiver, AccessControl, Pausable,
         returns (uint256)
     {
         uint256 liquidationThreshold = getLiquidationThreshold(erc721Token);
-        uint256 maxAmount = collateralFloorPrice.mul(100).div(liquidationThreshold);
-        require(borrowAmount <= maxAmount, "UNDERCOLLATERALIZED");
+        uint256 maxAmount = collateralFloorPrice.mul(100).div(liquidationThreshold); // TODO: use global var for liquidationThreshold
+        require(borrowAmount <= maxAmount, "UNDERCOLLATERALIZED"); 
 
         uint256 liquidationPrice = borrowAmount.mul(liquidationThreshold).div(100);
         return liquidationPrice;
@@ -341,10 +458,9 @@ contract CollateralManager is Context, IERC721Receiver, AccessControl, Pausable,
     /// @param erc721Token The ERC721 token to be used as collateral.
     /// @param tokenId The tokenId of the ERC721 token to be deposited.
     /// @param borrowAmount The amount of ERC20 tokens to be borrowed.
-    /// @param repaymentAmount The amount of ERC20 tokens to be repaid. 
-    /// @param interestRate The interest rate APR on the borrowed amount to 18 decimals.
+    /// @param interestRate The interest rate APR on the borrowed amount in RAY (1e27).
     /// @param collateralFloorPrice The current floor price of the ERC721 token.
-    /// @param maturity The borrow maturity timestamp.
+    /// @param timestamp When the borrow was executed.
     /// @dev Transfers the ERC721 to this contract address for escrow and creates a borrow. 
     /// @return Boolean for success.
     function _deposit(
@@ -353,16 +469,15 @@ contract CollateralManager is Context, IERC721Receiver, AccessControl, Pausable,
         address erc721Token, 
         uint256 tokenId, 
         uint256 borrowAmount,
-        uint256 repaymentAmount,
         uint256 interestRate,
         uint256 collateralFloorPrice,
-        uint256 maturity
+        uint40 timestamp
     ) 
         private 
         returns (bool)
     {
         address newOwner;
-        require(whitelisted[erc721Token], "NFT not whitelisted");
+        require(whitelisted[erc721Token], "NFT not whitelisted"); 
         
         IERC721(erc721Token).transferFrom(borrower, address(this), tokenId);
         newOwner = IERC721(erc721Token).ownerOf(tokenId);
@@ -384,11 +499,19 @@ contract CollateralManager is Context, IERC721Receiver, AccessControl, Pausable,
             borrower: borrower,
             erc20Token: erc20Token,
             borrowAmount: borrowAmount,
-            repaymentAmount: repaymentAmount,
             interestRate: interestRate,
             liquidationPrice: liquidationPrice,
-            maturity: maturity
+            timestamp: timestamp,
+            auction: DataTypes.Auction({
+                caller: address(0),
+                bidder: address(0),
+                bid: 0,
+                liquidationFee: 0,
+                timestamp: 0
+            })
         });
+
+        nftBorrows[keccak256(abi.encode(erc721Token, tokenId))] = id;
 
         userBorrows[borrower].push(id);
         counter.increment();
@@ -404,24 +527,32 @@ contract CollateralManager is Context, IERC721Receiver, AccessControl, Pausable,
     }    
 
     /// @notice Private function to withdraw ERC721 token from escrow and remove a borrow.
-    /// @param _id The borrower id.
+    /// @param _id The borrow id.
     /// @param _asset The ERC20 token to be repaid.
     /// @param _repaymentAmount The amount of ERC20 tokens to be repaid. 
     /// @dev Removes a borrow and transfers the ERC721 from escrow back to the borrower.
-    /// @return Boolean for success. 
+    /// @return Boolean for success and interestRate of borrow. 
     function _withdraw(
         uint256 _id, 
         address _asset, 
         uint256 _repaymentAmount
     ) 
         private
-        returns (bool)
+        returns (
+            bool, 
+            uint256,
+            uint256
+        )
     {
         address newOwner;
+
         address borrowAsset = borrows[_id].erc20Token;
-        uint256 borrowRepaymentAmount = borrows[_id].repaymentAmount;
         require(borrowAsset == _asset, "Repayment asset doesn't match borrow");
-        require(borrowRepaymentAmount == _repaymentAmount, "Repayment amount doesn't match borrow");
+
+        uint256 accruedBorrowAmount = borrows[_id].borrowAmount.rayMul(
+            InterestLogic.calculateLinearInterest(borrows[_id].interestRate, borrows[_id].timestamp)
+        );
+        require(accruedBorrowAmount == _repaymentAmount, "Repayment amount doesn't match borrow");
 
         address borrower = borrows[_id].borrower;
         address erc721Token = borrows[_id].collateral.erc721Token;
@@ -432,6 +563,12 @@ contract CollateralManager is Context, IERC721Receiver, AccessControl, Pausable,
         require(newOwner == borrower, "UNSUCCESSFUL_TRANSFER");
 
         borrows[_id].status = DataTypes.BorrowStatus.Repaid;
+        borrows[_id].borrowAmount = 0;
+        borrows[_id].liquidationPrice = 0;
+        borrows[_id].timestamp = uint40(block.timestamp);
+        
+        // Setting ID to zero so that a new borrow is created in future
+        nftBorrows[keccak256(abi.encode(erc721Token, tokenId))] = 0;
         
         emit WithdrawCollateral(
             borrower,
@@ -440,7 +577,7 @@ contract CollateralManager is Context, IERC721Receiver, AccessControl, Pausable,
             _id
         );
 
-        return true;
+        return (true, borrows[_id].borrowAmount, borrows[_id].interestRate);
     }
 
     /// @notice Private function to retrieve the collateral for a borrow liquidator.
@@ -460,10 +597,14 @@ contract CollateralManager is Context, IERC721Receiver, AccessControl, Pausable,
         returns (bool)
     {
         address newOwner;
+
         address borrowAsset = borrows[_id].erc20Token;
-        uint256 borrowRepaymentAmount = borrows[_id].repaymentAmount;
         require(borrowAsset == _asset, "Repayment asset doesn't match borrow");
-        require(borrowRepaymentAmount == _repaymentAmount, "Repayment amount doesn't match borrow");
+
+        uint256 accruedBorrowAmount = borrows[_id].borrowAmount.rayMul(
+            InterestLogic.calculateLinearInterest(borrows[_id].interestRate, borrows[_id].timestamp)
+        );
+        require(accruedBorrowAmount == _repaymentAmount, "Repayment amount doesn't match borrow");
 
         address erc721Token = borrows[_id].collateral.erc721Token;
         uint256 tokenId = borrows[_id].collateral.tokenId;
@@ -483,4 +624,56 @@ contract CollateralManager is Context, IERC721Receiver, AccessControl, Pausable,
 
         return true;
     } 
+
+    struct UpdateVars {
+        address borrowAsset;
+        uint256 accruedBorrowAmount;
+        uint256 updatedBorrowAmount;
+    }
+
+    /// @notice Private function to update (partial borrow/repay) against borrow position.
+    /// @param _id The borrow id.
+    /// @param _asset The ERC20 token to be borrowed/repaid.
+    /// @param _updateAmount The amount of ERC20 tokens to be borrowed/repaid. 
+    /// @param _isRepayment True if a partial repayment. False if update is to borrow more. 
+    /// @dev Updates the borrow position with amount + accrued interest, and updates timestamp for interest accrual calculation.
+    /// @return Boolean for success, borrowAmount and interestRate. 
+    function _updateBorrow(
+        uint256 _id,
+        address _asset,
+        uint256 _updateAmount,
+        uint256 _collateralFloorPrice,
+        DataTypes.BorrowStatus _status,
+        bool _isRepayment,
+        address _msgSender
+    )
+        private
+        returns (bool, uint256, uint256)
+    {
+        UpdateVars memory vars;
+        require(_msgSender == borrows[_id].borrower, "NOT_BORROWER");
+
+        vars.accruedBorrowAmount = borrows[_id].borrowAmount.rayMul(
+            InterestLogic.calculateLinearInterest(borrows[_id].interestRate, borrows[_id].timestamp)
+        );
+
+        vars.updatedBorrowAmount = _isRepayment ? vars.accruedBorrowAmount - _updateAmount : vars.accruedBorrowAmount + _updateAmount;
+        
+        require(vars.updatedBorrowAmount < _collateralFloorPrice.mul(100).div(150) , "UNDERCOLLATERALIZED"); // TODO: updata 150 to dynamic amount
+
+        vars.borrowAsset = borrows[_id].erc20Token;
+        require(vars.borrowAsset == _asset, "Repayment asset doesn't match borrow");
+
+
+        borrows[_id].status = _status;
+        borrows[_id].borrowAmount = vars.updatedBorrowAmount;
+        borrows[_id].liquidationPrice = _getLiquidationPrice(
+            borrows[_id].collateral.erc721Token,
+            borrows[_id].borrowAmount,
+            _collateralFloorPrice
+        );
+        borrows[_id].timestamp = uint40(block.timestamp);
+
+        return (true, borrows[_id].borrowAmount, borrows[_id].interestRate);
+    }
 }

@@ -3,13 +3,15 @@ pragma solidity ^0.8.0;
 
 interface ILendingPool {
     function initReserve(
+        address collateral,
         address asset, 
-        address nTokenAddress, 
-        address debtTokenAddress
+        address fTokenAddress, 
+        address debtTokenAddress,
+        string calldata assetName
     ) 
         external;
 
-    function deposit(address asset, uint256 amount) external;
+    function deposit(address collateral, address asset, uint256 amount) external;
 
     function withdraw(address asset, uint256 amount) external;
 
@@ -23,6 +25,7 @@ interface ILendingPool {
         external;
 
     function repay(
+        address collateral, 
         address asset,
         uint256 repaymentAmount,
         uint256 borrowId
@@ -36,32 +39,51 @@ interface ILendingPool {
     ) 
         external;
 
+    function getLiquidityIndex(
+        address collateral,
+        address asset
+    )
+        external 
+        returns (uint256);
+
+    function getUnderlyingAsset(
+        address fToken
+    )
+        external 
+        returns (address);
+
+    function getReserveNormalizedIncome(
+        address collateral,
+        address asset
+    )
+        external 
+        view
+        returns (uint256);
+
     function pause() external;
 
     function unpause() external;
 
-    function freezeReserve(address asset) external;
+    function updateInterestFee(uint256 interestFee) external;
 
-    function pauseReserve(address asset) external;
+    function updateLiquidationFee(uint256 liquidationFee) external;
 
-    function protectReserve(address asset) external;
+    function updateLiquidationFeeProtocolPercentage(uint256 protocolPercentage) external;
 
-    function activateReserve(address asset) external;
+    function updateReserve(address collateral, address asset, bytes32 status) external;
 
-    function connectCollateralManager(address _collateralManagerAddress) external;
-
-    function connectTokenPriceOracle(address _oracleTokenPriceAddress) external;
+    function connectContract(bytes32 contractName, address contractAddress) external;
 
     function getFloorPrice(address collateral, address asset) external returns (uint256);
 
-    function getLiquidationThreshold(address collateral) external returns (bool, uint256);
-
-    function getTokenPriceOracleAddress() external view returns (address);
+    function getTokenPriceConsumerAddress() external view returns (address);
 
     function getFloorPriceMock(address collateral) external view returns (uint256);
 
     function getCollateralManagerAddress() external view returns (address);
 
+    function setAuctionDuration(uint40 duration) external;
 
+    function getAuctionDuration() external returns (uint40);
 
 }

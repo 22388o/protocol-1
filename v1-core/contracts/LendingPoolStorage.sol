@@ -12,15 +12,31 @@ contract LendingPoolStorage {
     using ReserveLogic for DataTypes.Reserve;
 
     address internal _treasuryAddress;
+    address internal _lendingPoolBidAddress;
+    address internal _lendingPoolBorrowAddress;
+    address internal _lendingPoolDepositAddress;
+    address internal _lendingPoolLiquidateAddress;
+    address internal _lendingPoolRedeemAddress;
+    address internal _lendingPoolRepayAddress;
+    address internal _lendingPoolWithdrawAddress;
 
-    mapping(address => DataTypes.Reserve) internal _reserves;
+    mapping(bytes32 => DataTypes.Reserve) internal _reserves;
+    mapping(address => address) internal _underlyingAssets;
     mapping(address => string) internal _pricePairs;
+    mapping(address => string) internal _assetNames;
+
+    // mapping(address => mapping(address => uint256)) userScaledBalances;
+    // mapping(address => mapping(address => uint256)) userFTokenBalances;
 
     address internal _collateralManagerAddress;
-    address internal _tokenPriceOracleAddress;
+    address internal _tokenPriceConsumerAddress;
+    address internal _nftPriceConsumerAddress;
 
     bool internal _isCollateralManagerConnected = false;
 
     uint256 internal _interestFee;
     uint256 internal _liquidationFee;
+    uint256 internal _liquidationFeeProtocolPercentage;
+
+    uint40 internal _auctionDuration = 24 hours;
 }

@@ -6,9 +6,9 @@
 
 ![System Diagram](../assets/nftlend-system-diagram.png?raw=true "System diagram")
 
-The `Configurator` and `LendingPool` contracts use interfaces to call and update state within the `CollateralManager`, `NToken` and `DebtToken` contracts. Oracle contracts are called directly.
+The `Configurator` and `LendingPool` contracts use interfaces to call and update state within the `CollateralManager`, `FToken` and `DebtToken` contracts. Oracle contracts are called directly.
 
-### `NTokens`
+### `FTokens`
 * Inherit from `IER20` to make use to the ERC20 Token Standard functions.
 * Functions `totalSupply`, `balanceOf(account)`, `transfer`, `transferFrom`, `_mint` and `_burn` used as an efficient and decentralized method of accounting through tokenization.
 
@@ -18,21 +18,21 @@ The `Configurator` and `LendingPool` contracts use interfaces to call and update
 
 ### `LendingPool`
 * `deposit()`: 
-  * Uses the `IERC20` interface to transfer tokens from sender to the `NToken` contract
-  * Uses the `INToken` interface to mint the sender nTokens from the `NToken` contract.
+  * Uses the `IERC20` interface to transfer tokens from sender to the `FToken` contract
+  * Uses the `IFToken` interface to mint the sender fTokens from the `FToken` contract.
 * `withdraw()`: 
-  * Uses the `INToken` interface to burn tokens from sender account within the `NToken` contract
-  * Uses the `INToken` interface transfer tokens from the `NToken` contract to the sender.
+  * Uses the `IFToken` interface to burn tokens from sender account within the `FToken` contract
+  * Uses the `IFToken` interface transfer tokens from the `FToken` contract to the sender.
 * `borrow()`: 
   * Uses the `ICollateralManager` interface to deposit collateral and create a borrow within the `CollateralManager` contract.
   * Uses the `IDebtToken` interface mint debtTokens from the `DebtToken` contract to the sender.
-  * Uses the `INToken` interface to transfer tokens from the `Ntoken` contract to the sender. 
+  * Uses the `IFToken` interface to transfer tokens from the `FToken` contract to the sender. 
 * `repay()`:
-  * Uses the `INToken` interface to transfer tokens from the sender to the `Ntoken` contract. 
+  * Uses the `IFToken` interface to transfer tokens from the sender to the `FToken` contract. 
   * Uses the `ICollateralManager` interface to withdraw collateral and repay a borrow within the `CollateralManager` contract.
   * Uses the `IDebtToken` interface burn debtTokens held by sender.
 * `liquidate()`:
-  * Uses the `IERC20` interface to transfer tokens from the sender to the `Ntoken` contract, `LendingPool` contract and borrower account.
+  * Uses the `IERC20` interface to transfer tokens from the sender to the `FToken` contract, `LendingPool` contract and borrower account.
   * Uses the `IDebtToken` interface burn debtTokens held by the borrower.
   * Uses the `ICollateralManager` interface to retrieve the collateral and liquidate a borrow within the `CollateralManager` contract.
 
@@ -45,7 +45,7 @@ The `Configurator` and `LendingPool` contracts use interfaces to call and update
   * set state variables.
   * `pause()` / `unpause()` the `LendingPool` contract.
   * `initLendingPoolReserve()`, `freezeLendingPoolReserve()`, `pauseLendingPoolReserve()`, `protectLendingPoolReserve()` and `activateLendingPoolReserve()` to create and manage reserve issues without having to pause the whole contract.
-* Uses the `ICollateralManager`, `INToken` and `IDebtToken` interfaces to:
+* Uses the `ICollateralManager`, `IFToken` and `IDebtToken` interfaces to:
   * set state variables.
   * `pause()` / `unpause()` their respective contracts.
 
@@ -64,14 +64,14 @@ The `Configurator` and `LendingPool` contracts use interfaces to call and update
 
 `IERC721Receiver` OpenZeppelin interface inherited to receive the safe transfer of ERC721 tokens. 
 
-`ILendingPool`, `ICollateralManager`, `INToken` and `IDebtToken` interfaces created and used to interact with their respective protocol contracts.
+`ILendingPool`, `ICollateralManager`, `IFToken` and `IDebtToken` interfaces created and used to interact with their respective protocol contracts.
 
 `DataTypes` library created and used to share data types between protocol contracts. 
 
 ### `LendingPool`
 
 * Inherits: `Context`, `LendingPoolStorage`, `AcessControl`, `Pausable` and `ReentrancyGuard`.
-* Uses interfaces: `IERC20`, `INToken`, `IDebtToken`, `ICollateralManager`
+* Uses interfaces: `IERC20`, `IFToken`, `IDebtToken`, `ICollateralManager`
 * Uses library: `DataTypes` 
 
 ### `CollateralManager`
@@ -80,9 +80,9 @@ The `Configurator` and `LendingPool` contracts use interfaces to call and update
 * Uses interfaces: `IERC721`, `IERC721Receiver`
 * Uses library: `DataTypes` 
 
-### `NToken`
+### `FToken`
 
-* Inherits: `Context`, `INToken`, `AcessControl` and `ERC20Pausable`.
+* Inherits: `Context`, `IFToken`, `AcessControl` and `ERC20Pausable`.
 * Uses interfaces: `IERC20`
 
 ### `DebtToken`
@@ -93,7 +93,7 @@ The `Configurator` and `LendingPool` contracts use interfaces to call and update
 ### `Configurator`
 
 * Inherits: `Context` and `AcessControl`.
-* Uses interfaces: `ILendingPool`, `ICollateralManager`, `INToken` and `IDebtToken`.
+* Uses interfaces: `ILendingPool`, `ICollateralManager`, `IFToken` and `IDebtToken`.
 
 <!-- ## Oracles
 
@@ -113,7 +113,7 @@ TODO -->
     * `pause()` and `unpause()`
   * `LENDING_POOL_ROLE`
     * `deposit()`, `withdraw()` and `retrieve()`
-#### `NToken`
+#### `FToken`
   * `CONFIGURATOR_ROLE`
     * `pause()` and `unpause()`
   * `LENDING_POOL_ROLE`
@@ -127,7 +127,7 @@ TODO -->
   * `ADMIN_ROLE`
     * `connectLendingPool()`, `connectCollateralManager()`, `connectLendingPoolCollateralManager()`, `initLendingPoolReserve()`, `setCollateralManagerInterestRate()`, `setCollateralManagerLiquidationThreshold()`, `updateCollatearlManagerWhitelist()` and connect oracles.
   * `EMERGENCY_ADMIN_ROLE`
-    * `pauseLendingPool()`, `unpauseLendingPool()`, `freezeLendingPoolReserve()`, `pauseLendingPoolReserve()`, `protectLendingPoolReserve()`, `activateLendingPoolReserve()`, `pauseCollateralManager()`, `unpauseCollateralManager()`, `pauseNToken()`, `unpauseNToken()`, `pauseDebtToken()` and `unpauseDebtToken()`
+    * `pauseLendingPool()`, `unpauseLendingPool()`, `freezeLendingPoolReserve()`, `pauseLendingPoolReserve()`, `protectLendingPoolReserve()`, `activateLendingPoolReserve()`, `pauseCollateralManager()`, `unpauseCollateralManager()`, `pauseFToken()`, `unpauseFToken()`, `pauseDebtToken()` and `unpauseDebtToken()`
 
 <!-- ## Upgradable Contracts
 

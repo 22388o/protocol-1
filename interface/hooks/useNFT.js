@@ -25,7 +25,7 @@ export const useNFT = () => {
 
     const fetchImagesPUNK = async () => {
         const imageDict = {};
-        for (var tokenId = 0; tokenId < 6; tokenId++) { // NOTE: Only 6 minted as per scripts/deploy.js 
+        for (var tokenId = 0; tokenId < 10; tokenId++) { // NOTE: Only 6 minted as per scripts/deploy.js 
             const owner = await nftContract["PUNK"].ownerOf(tokenId);
             if (owner==account) {
                 let paddedTokenId = tokenId.toString().padStart(4, '0');
@@ -38,7 +38,7 @@ export const useNFT = () => {
 
     const fetchImagesBAYC = async () => {
         const imageDict = {};
-        for (var tokenId = 0; tokenId < 6; tokenId++) { // NOTE: Only 6 minted as per scripts/deploy.js 
+        for (var tokenId = 0; tokenId < 10; tokenId++) { // NOTE: Only 6 minted as per scripts/deploy.js 
             const owner = await nftContract["BAYC"].ownerOf(tokenId);
             if (owner==account) {
                 let response = await fetch(`https://ipfs.io/ipfs/QmeSjSinHpPnmXmspMjwiXyN6zS4E9zccariGR3jxcaWtq/${tokenId}`);

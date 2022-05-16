@@ -15,10 +15,9 @@ interface ICollateralManager {
         address erc721Token, 
         uint256 tokenId, 
         uint256 borrowAmount,
-        uint256 repaymentAmount,
         uint256 interestRate,
         uint256 liquidationPrice,
-        uint256 maturity
+        uint40 timestamp
     ) 
         external 
         returns (bool success);
@@ -29,7 +28,11 @@ interface ICollateralManager {
         uint256 repaymentAmount
     ) 
         external
-        returns (bool success);
+        returns (
+            bool success,
+            uint256 borrowAmount,
+            uint256 interestRate
+        );
 
     function retrieve(
         uint256 _id, 
@@ -40,9 +43,9 @@ interface ICollateralManager {
         external
         returns (bool success);
     
-    function setInterestRate(address _erc721Token, uint256 interestRate) external;
+    function setInterestRate(address collateral, address asset, uint256 interestRate) external;
 
-    function getInterestRate(address _erc721Token) external returns (uint256);
+    function getInterestRate(address collateral, address asset) external returns (uint256);
     
     function setLiquidationThreshold(address _erc721Token, uint256 _threshold) external;
 
@@ -53,4 +56,45 @@ interface ICollateralManager {
     function getUserBorrowIds(address user) external view;
 
     function getBorrow(uint256 borrowId) external returns (DataTypes.Borrow memory);
+
+    function getBorrowId(address collateral, uint256 tokenId) external returns (uint256);
+
+    function getBorrowBalance(address collateral, uint256 tokenId) external returns (uint256);
+
+    function setBorrowAuctionBid(
+        uint256 borrowId,
+        uint256 auctionBid,
+        address auctionBidder
+    ) 
+        external
+        returns (bool);
+
+    function setBorrowAuctionCall(
+        uint256 borrowId,
+        uint256 auctionBid,
+        uint256 auctionLiquidationFee,
+        uint40 auctionTimestamp,
+        address auctionCaller
+    ) 
+        external
+        returns (bool);    
+
+    function setBorrowStatus(
+        uint256 borrowId,
+        DataTypes.BorrowStatus status
+    ) 
+        external
+        returns (bool);
+
+    function updateBorrow(
+        uint256 borrowId,
+        address asset,
+        uint256 updateAmount,
+        uint256 collateralFloorPrice,
+        DataTypes.BorrowStatus status,
+        bool isRepayment,
+        address msgSender
+    )
+        external
+        returns (bool, uint256, uint256);
 }

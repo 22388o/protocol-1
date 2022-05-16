@@ -26,8 +26,10 @@
     "@nomiclabs/hardhat-etherscan": "^2.1.7",
     "dotenv": "^10.0.0",
     "hardhat": "^2.6.8",
+    "hardhat-contract-sizer": "^2.5.1",
     "hardhat-deploy-fake-erc20": "0.0.3-alpha",
     "hardhat-gas-reporter": "^1.0.4",
+    "requirejs": "^2.3.6",
     "solidity-coverage": "^0.7.17"
   }
 }

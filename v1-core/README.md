@@ -27,12 +27,12 @@ npx hardhat test
 
 Run local Harhdat node:
 ```shell
-npx hardhat node
+npx hardhat node --network hardhat
 ```
 
 In a different shell window run the deploy script:
 ```shell
-npx hardhat run --network localhost scripts/deploy.js
+npx hardhat run --network localhost scripts/deployFork.js
 ```
 
 ## Licensing
