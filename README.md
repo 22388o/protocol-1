@@ -10,5 +10,5 @@ At FluidNFT we are building non-custodial community banking and asset management
 
 ## Licensing
 
-The primary license for both the NFTlend V1 Core and Interface is the Business Source License 1.1 (`BUSL-1.1`), see:
+The primary license for the Protocol is the Business Source License 1.1 (`BUSL-1.1`), see:
 * [`./v1-core/LICENSE`](./v1-core/LICENCE).
