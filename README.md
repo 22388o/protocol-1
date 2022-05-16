@@ -8,6 +8,10 @@ At FluidNFT we are building non-custodial community banking and asset management
 
 [Video Demo](https://youtu.be/1P2qRy2qDt8)
 
+## Docs
+
+WIP
+
 ## Licensing
 
 The primary license for the Protocol is the Business Source License 1.1 (`BUSL-1.1`), see:
